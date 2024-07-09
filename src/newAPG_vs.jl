@@ -1,3 +1,5 @@
+export Solver_newAPG_vs
+
 @with_kw struct Solver_newAPG_vs
     method=:newAPG_vs
     params_user

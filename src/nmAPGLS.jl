@@ -1,3 +1,5 @@
+export Solver_nmAPGLS
+
 @with_kw struct Solver_nmAPGLS
     method=:nmAPGLS
     params_user

@@ -1,3 +1,5 @@
+export Solver_ANSPG
+
 @with_kw struct Solver_ANSPG
     method=:ANSPG
     params_user
@@ -11,7 +13,7 @@
         :β  => 0.01,
 
         :αₘᵢₙ => 10^-30,
-        :αₘₐₓ => 10^-30,
+        :αₘₐₓ => 10^30,
 
         :γ₀ => nothing,
         :m  => 5,
@@ -19,7 +21,7 @@
         :δ  => 0.01,
 
         :γₘᵢₙ => 10^-30,
-        :γₘₐₓ => 10^-30
+        :γₘₐₓ => 10^30
     ]
 
     params=append_params(params_default, params_user)
@@ -51,7 +53,7 @@ function ANSPG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Nu
             Fzₖ=F(zₖ)
             nzₖᵢ₋yₖ=norm(zₖ.-yₖ)^2
 
-            if Fzₖ+β*αₖ*nzₖᵢ₋yₖ<=Fyₗ₍ₖ₎ 
+            if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ)<=Fyₗ₍ₖ₎ 
                 break
             end
 
@@ -64,7 +66,7 @@ function ANSPG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Nu
 
         Fxₗ₍ₖ₎=maximum(last_xₘ)
 
-        if Fzₖ+β*αₖ*nzₖᵢ₋yₖ<=Fxₗ₍ₖ₎
+        if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ)<=Fxₗ₍ₖ₎
             vₗₐₛₜ=yₖ
             xₖ=zₖ
             Fxₖ=Fzₖ
@@ -93,7 +95,7 @@ function ANSPG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Nu
 
                 Fvₖ=F(vₖ)
 
-                if Fvₖ+δ*γₖ*norm(vₖ.-xₖ)^2<=Fxₗ₍ₖ₎
+                if Fvₖ+δ*norm(vₖ.-xₖ)^2/(2*γₖ)<=Fxₗ₍ₖ₎
                     break
                 end
             

@@ -1,3 +1,5 @@
+export Solver_NSPG
+
 @with_kw struct Solver_NSPG
     method=:NSPG
     params_user
@@ -11,7 +13,7 @@
         :δ  => 0.01,
         
         :γₘᵢₙ => 10^-30,
-        :γₘₐₓ => 10^-30,
+        :γₘₐₓ => 10^30,
     ]
 
     params=append_params(params_default, params_user)
@@ -22,11 +24,10 @@ function NSPG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Num
     gr=1
     flag=false
     Tₜ=T₀=time()
-    xₖ₋₁=xₖ=x₀
+    sₖ=xₖ₋₁=xₖ=x₀
     F_best=Fxₖ=F(x₀)
     ∇fxₖ₋₁=∇fxₖ=∇f(xₖ)
     nsₖ=γₖ=γ₀
-    sₖ=zeros(Float64, length(xₖ))
     lastₘ=[Fxₖ for i=1:m]
     
     k=1
@@ -42,7 +43,7 @@ function NSPG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Num
             sₖ=xₖ.-xₖ₋₁
             nsₖ=sₖ'sₖ
 
-            if Fxₖ+γₖ*δ*nsₖ/2<=Fxₗ₍ₖ₎ 
+            if Fxₖ+δ*nsₖ/(2*γₖ)<=Fxₗ₍ₖ₎ 
                 break
             end
 

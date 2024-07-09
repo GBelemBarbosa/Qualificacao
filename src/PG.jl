@@ -1,5 +1,7 @@
-@with_kw struct Solver_FISTA
-    method=:FISTA
+export Solver_PG
+
+@with_kw struct Solver_PG
+    method=:PG
     params_user
     
     params_default=[
@@ -10,22 +12,20 @@
     params=append_params(params_default, params_user)
 end
 
-function FISTA(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Number}, L:: Number, kₘₐₓ:: Int64; ϵ=eps(), p=Inf) 
+function PG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Number}, L:: Number, kₘₐₓ:: Int64; ϵ=eps(), p=Inf)
     flag=false
     Tₜ=T₀=time()
-    yₖ=xₖ₋₁=xₖ=x₀
+    xₖ₋₁=xₖ=x₀
+    ∇fxₖ₋₁=∇fxₖ=∇f(xₖ)
     Lᵢₙᵥ=1/L
-    tₖ=1.0
-    L=s
     
     k=1
     while true
-        ∇fyₖ=∇f(yₖ)
-        xₖ=prox(Lᵢₙᵥ, yₖ, ∇fyₖ) 
+        xₖ=prox(Lᵢₙᵥ, xₖ, ∇fxₖ) 
 
         T₁=time()
         Tₜ=T₁-T₀
-        ⎷nψₖ=norm(∇f(xₖ).-∇fyₖ.+(yₖ.-xₖ).*L, p)
+        ⎷nψₖ=norm(∇fxₖ.-∇fxₖ₋₁.+(xₖ₋₁.-xₖ).*L, p)+Inf*(k==1)
         T₀+=time()-T₁
 
         if ⎷nψₖ<ϵ || k==kₘₐₓ
@@ -36,10 +36,9 @@ function FISTA(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Nu
             break
         end
         k+=1
-
-        tₖ₋₁, tₖ=tₖ, (1+sqrt(1+4*tₖ^2))/2
-        yₖ=xₖ.+((tₖ₋₁-1)/tₖ).*(xₖ.-xₖ₋₁)
+        
         xₖ₋₁=xₖ
+        ∇fxₖ₋₁, ∇fxₖ=∇fxₖ, ∇f(xₖ)
     end 
 
     converg=!flag*Inf

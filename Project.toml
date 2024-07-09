@@ -1,0 +1,5 @@
+name = "QualiGBelem"
+authors = ["Gabriel Belém Barbosa <g234672@dac.unicamp.br>"]
+
+[deps]
+KrylovKit = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
