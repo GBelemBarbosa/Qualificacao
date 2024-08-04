@@ -13,8 +13,7 @@ export Solver_PG
 end
 
 function PG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Number}, L:: Number, kₘₐₓ:: Int64; ϵ=eps(), p=Inf)
-    flag=false
-    Tₜ=T₀=time()
+    T₀=time()
     xₖ₋₁=xₖ=x₀
     ∇fxₖ₋₁=∇fxₖ=∇f(xₖ)
     Lᵢₙᵥ=1/L
@@ -24,23 +23,17 @@ function PG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Numbe
         xₖ=prox(Lᵢₙᵥ, xₖ, ∇fxₖ) 
 
         T₁=time()
-        Tₜ=T₁-T₀
         ⎷nψₖ=norm(∇fxₖ.-∇fxₖ₋₁.+(xₖ₋₁.-xₖ).*L, p)+Inf*(k==1)
         T₀+=time()-T₁
 
-        if ⎷nψₖ<ϵ || k==kₘₐₓ
-            if ⎷nψₖ<ϵ
-                flag=true
-            end
-
-            break
+        if ⎷nψₖ<ϵ 
+            return F(xₖ), time()-T₀, k, k
+        elseif k==kₘₐₓ
+            return F(xₖ), Inf, Inf, Inf
         end
         k+=1
         
         xₖ₋₁=xₖ
         ∇fxₖ₋₁, ∇fxₖ=∇fxₖ, ∇f(xₖ)
-    end 
-
-    converg=!flag*Inf
-    return F(xₖ), Tₜ+converg, k+converg, k+converg
+    end
 end

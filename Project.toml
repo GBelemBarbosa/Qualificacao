@@ -2,4 +2,8 @@ name = "QualiGBelem"
 authors = ["Gabriel Belém Barbosa <g234672@dac.unicamp.br>"]
 
 [deps]
+Interact = "c601a237-2ae4-5e1e-952c-7a85b0c7eef1"
 KrylovKit = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
+MethodAnalysis = "85b6ec6f-f7df-4429-9514-a64bcd9ee824"
+PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+WebIO = "0f1e0344-ec1d-5b48-a673-e5cf874b6c29"

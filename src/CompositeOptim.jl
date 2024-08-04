@@ -6,6 +6,8 @@ using LinearAlgebra
 using KrylovKit
 # Structs com campos pre-definidos
 using Parameters: @with_kw
+# Análise de function specification
+using MethodAnalysis
 
 include("l2l0.jl")
 
@@ -71,7 +73,11 @@ function solve(problem, solver, ϵ:: Number, kₘₐₓ:: Int64)
         println("γ₀ = ", γ₀)
 
         # Executa o algoritmo no problema com os parâmetros selecionados
-        return NSPG(problem.F, problem.∇f, problem.prox, x₀, γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
+        if problem.optmizable
+            return NSPGopt(problem.Fopt, problem.∇fopt, problem.prox, x₀, γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
+        else 
+            return NSPG(problem.F, problem.∇f, problem.prox, x₀, γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
+        end
     elseif solver.method==:ANSPG
         if isnothing(d[:γ₀])
             γ₀ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
@@ -89,7 +95,11 @@ function solve(problem, solver, ϵ:: Number, kₘₐₓ:: Int64)
         end
         println("γ₀, α₀ = ", γ₀, ", ", α₀)
 
-        return ANSPG(problem.F, problem.∇f, problem.prox, x₀, α₀, d[:ρ], d[:β], d[:αₘᵢₙ,], d[:αₘₐₓ], Int(d[:n]), γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
+        if problem.optmizable
+            return ANSPGopt(problem.Fopt, problem.∇fopt, problem.prox, x₀, α₀, d[:ρ], d[:β], d[:αₘᵢₙ,], d[:αₘₐₓ], Int(d[:n]), γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
+        else 
+            return ANSPG(problem.F, problem.∇f, problem.prox, x₀, α₀, d[:ρ], d[:β], d[:αₘᵢₙ,], d[:αₘₐₓ], Int(d[:n]), γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
+        end
     elseif solver.method==:PG || solver.method==:FISTA
         if isnothing(d[:L])
             L = problem.L
@@ -101,9 +111,12 @@ function solve(problem, solver, ϵ:: Number, kₘₐₓ:: Int64)
             α₀ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
         end
         println("α₀ = ", α₀)
-
-        return nmAPGLS(problem.F, problem.∇f, problem.prox, x₀, α₀, d[:ρ], d[:η], d[:δ], kₘₐₓ; ϵ=ϵ)
-    else
+        if problem.optmizable
+            return nmAPGLSopt(problem.Fopt, problem.∇fopt, problem.prox, x₀, α₀, d[:ρ], d[:η], d[:δ], kₘₐₓ; ϵ=ϵ)
+        else
+            return nmAPGLS(problem.F, problem.∇f, problem.prox, x₀, α₀, d[:ρ], d[:η], d[:δ], kₘₐₓ; ϵ=ϵ)
+        end
+     else
         if isnothing(d[:λ₁])
             λ₁ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
         else
@@ -111,7 +124,11 @@ function solve(problem, solver, ϵ:: Number, kₘₐₓ:: Int64)
         end
         println("λ₁ = ", λ₁)
 
-        return newAPG_vs(problem.f, problem.h, problem.∇f, problem.prox, d[:Q], d[:E], x₀, λ₁, d[:μ₀], d[:μ₁], d[:c], d[:δ], kₘₐₓ; ϵ=ϵ)
+        if problem.optmizable
+            return newAPG_vsopt(problem.fopt, problem.h, problem.∇fopt, problem.prox, d[:Q], d[:E], x₀, λ₁, d[:μ₀], d[:μ₁], d[:c], d[:δ], kₘₐₓ; ϵ=ϵ)
+        else
+            return newAPG_vs(problem.f, problem.h, problem.∇f, problem.prox, d[:Q], d[:E], x₀, λ₁, d[:μ₀], d[:μ₁], d[:c], d[:δ], kₘₐₓ; ϵ=ϵ)
+        end
     end
 end     
 
