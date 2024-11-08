@@ -1,5 +1,5 @@
 name = "QualiGBelem"
-authors = ["Gabriel Belém Barbosa <g234672@dac.unicamp.br>"]
+authors = ["Gabriel Belém Barbosa <g234672@dac.unicamp.br > "]
 
 [deps]
 Interact = "c601a237-2ae4-5e1e-952c-7a85b0c7eef1"

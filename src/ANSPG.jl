@@ -1,296 +1,393 @@
-export Solver_ANSPG
+export ANSPGModel
 
-@with_kw struct Solver_ANSPG
-    method=:ANSPG
-    params_user
+@with_kw mutable struct ANSPGModel <: AbstractCompositeSolver
+    method = :ANSPG
+    
+    params:: Dict{Symbol, Any} = Dict{Symbol, Any}()
 
-    params_default=[
-        :x₀ => nothing,
+    ϵ:: Number     = eps()
+    p:: Number     = Inf
+    kₘₐₓ:: Int64   = typemax(Int64)
+    Tₘₐₓ:: Float64 = Inf
+    x₀             = nothing
 
-        :α₀ => nothing,
-        :n  => 2,
-        :ρ  => 0.5,
-        :β  => 0.01,
+    α₀:: Number  = NaN
+    n:: Int64    = 5
+    ρ:: Float64  = 0.25
+    β:: Float64  = 0.01
 
-        :αₘᵢₙ => 10^-30,
-        :αₘₐₓ => 10^30,
+    αₘᵢₙ:: Number = eps()
+    αₘₐₓ:: Number = typemax(Int64)
 
-        :γ₀ => nothing,
-        :m  => 5,
-        :τ  => 0.5,
-        :δ  => 0.01,
+    m:: Int64   = 5
+    τ:: Number  = 0.25
+    δ:: Number  = 0.01
 
-        :γₘᵢₙ => 10^-30,
-        :γₘₐₓ => 10^30
-    ]
-
-    params=append_params(params_default, params_user)
+    γₘᵢₙ:: Number = eps()
+    γₘₐₓ:: Number = typemax(Int64)
 end
 
-function ANSPG(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Number}, α₀:: Number, ρ:: Number, β:: Number, αₘᵢₙ:: Number, αₘₐₓ:: Number, n:: Int64, γ₀:: Number, τ:: Number, δ:: Number, γₘᵢₙ:: Number, γₘₐₓ:: Number, m:: Int64, kₘₐₓ:: Int64; ϵ=eps(), p=Inf)
-    pr=0
-    gr=1
-    Tᵥ=0.0 # Possible time spent on ∇f(xₖ) (doesn't happen each iteration)
-    
-    T₀=time()
-    vₖ=yₖ₋₁=yₖ=zₖ=vₗₐₛₜ=xₖ₋₁=xₖ=x₀
-    F_best=Fvₖ=Fzₖ=Fxₖ=F(xₖ)
-    ∇fyₖ₋₁=∇fyₖ=∇fvₗₐₛₜ=∇fxₖ=∇f(xₖ)
-    αₒᵣγₗₐₛₜ=αₖ=α₀
-    nzₖᵢ₋yₖ=tₖ=1.0 
+function ANSPG(ProblemModel:: AbstractCompositeModel, SolverModel:: ANSPGModel)
+    @unpack_ANSPGModel SolverModel
+    if isnothing(x₀)
+        x₀ = ProblemModel.x₀
+    end
+    F, ∇f, prox = ProblemModel.F, ProblemModel.∇f, ProblemModel.prox
 
-    last_yₙ=[Fxₖ for i=1:n]
-    last_xₘ=[Fxₖ for i=1:m]
+    F_hist = Vector{Float64}(undef, kₘₐₓ+1)
+    crit_hist = Vector{Float64}(undef, kₘₐₓ)
+    nF_hist = Vector{Int64}(undef, kₘₐₓ+1)
+    nF_hist[1:2] .= 1
+    pr_hist = Vector{Int64}(undef, kₘₐₓ)
+    pr_hist[1] = 0
+    gr_hist = Vector{Int64}(undef, kₘₐₓ)
+    gr_hist[1] = 1
+    T∇ = 0.0 # Tempo descontado quando ∇f(xₖ) é calculado para definir convergência, mas não é usado pelo método 
     
-    k=1
-    while true
-        Fyₗ₍ₖ₎=maximum(last_yₙ)
+    T₀ = time()
+    x_best = vₖ = yₖ₋₁ = yₖ = zₖ = vₗₐₛₜ = xₖ₋₁ = xₖ = x₀
+    F_best = Fvₖ = Fzₖ = Fxₖ = F(xₖ)
+    ∇fyₖ₋₁ = ∇fyₖ = ∇fvₗₐₛₜ = ∇fxₖ = ∇f(xₖ)
+    if isnan(α₀)
+        α₀ = (sqrt(length(x₀))*10^-5)/norm(∇fxₖ.-∇f(x₀.+10^-5))
+        gr_hist[1] += 1
+        
+        @info "α₀ = $(@sprintf "%.3e" α₀)"
+    end
+    αₒᵣγₗₐₛₜ = αₖ = α₀
+    nzₖᵢ₋yₖ = tₖ = 1.0  
+    last_yₙ = [Fxₖ for i = 1:n]
+    last_xₘ = [Fxₖ for i = 1:m]
+    
+    F_hist[1] = Fxₖ
+
+    k = 1
+    status = k > kₘₐₓ ? :max_iter : time()-T₀ >= Tₘₐₓ ? :max_time : :running 
+    while status == :running
+        Fyₗ₍ₖ₎ = maximum(last_yₙ)
 
         while true
-            zₖ=prox(αₖ, yₖ, ∇fyₖ)
+            zₖ = prox(αₖ, yₖ, ∇fyₖ)
+            Fzₖ = F(zₖ)
+            nzₖᵢ₋yₖ = norm(zₖ.-yₖ)^2
 
-            pr+=1
+            pr_hist[k] += 1
+            nF_hist[k+1] += 1
 
-            Fzₖ=F(zₖ)
-            nzₖᵢ₋yₖ=norm(zₖ.-yₖ)^2
-
-            if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ)<=Fyₗ₍ₖ₎ 
+            if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ) <= Fyₗ₍ₖ₎ 
                 break
             end
 
-            αₖ*=ρ
+            αₖ *= ρ
 
-            if isnan(αₖ) || αₖ<αₘᵢₙ
-                return F_best, Inf, Inf, Inf
+            if isnan(αₖ) || αₖ < αₘᵢₙ
+                @warn "Busca linear resultou em isnan(αₖ) || αₖ < αₘᵢₙ" isnan(αₖ) αₖ < αₘᵢₙ
+                status = :exception
+                
+                break
             end
         end
 
-        Fxₗ₍ₖ₎=maximum(last_xₘ)
+        Fxₗ₍ₖ₎ = maximum(last_xₘ)
 
-        if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ)<=Fxₗ₍ₖ₎
-            vₗₐₛₜ=yₖ
-            xₖ=zₖ
-            Fxₖ=Fzₖ
-            ∇fvₗₐₛₜ=∇fyₖ
-            αₒᵣγₗₐₛₜ=αₖ
+        if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ) <= Fxₗ₍ₖ₎
+            vₗₐₛₜ = yₖ
+            xₖ = zₖ
+            Fxₖ = Fzₖ
+            ∇fvₗₐₛₜ = ∇fyₖ
+            αₒᵣγₗₐₛₜ = αₖ
         else
-            if k>1
-                sxₖ=xₖ.-yₖ₋₁
-                nsxₖ=sxₖ'sxₖ
-                rxₖ=∇fxₖ.-∇fyₖ₋₁
-                γₖ=nsxₖ/(sxₖ'rxₖ)
-                if γₖ>γₘₐₓ || γₖ<γₘᵢₙ
-                    γₖ=sqrt(nsxₖ/(rxₖ'rxₖ))
-                end
-
-                gr+=1
-                T₀+=Tᵥ
-            else
-                γₖ=γ₀
+            sxₖ = xₖ.-yₖ₋₁
+            nsxₖ = sxₖ'sxₖ
+            rxₖ = ∇fxₖ.-∇fyₖ₋₁
+            γₖ = nsxₖ/(sxₖ'rxₖ)
+            if γₖ > γₘₐₓ || γₖ < γₘᵢₙ
+                γₖ = sqrt(nsxₖ/(rxₖ'rxₖ))
             end
 
+            gr_hist[k] += 1
+            T₀ += T∇ # Acrescenta o tempo do cálculo ∇fxₖ que foi usado
+
             while true
-                vₖ=prox(γₖ, xₖ, ∇fxₖ)
+                vₖ = prox(γₖ, xₖ, ∇fxₖ)
+                Fvₖ = F(vₖ)
 
-                pr+=1
+                pr_hist[k] += 1
+                nF_hist[k+1] += 1
 
-                Fvₖ=F(vₖ)
-
-                if Fvₖ+δ*norm(vₖ.-xₖ)^2/(2*γₖ)<=Fxₗ₍ₖ₎
+                if Fvₖ+δ*norm(vₖ.-xₖ)^2/(2*γₖ) <= Fxₗ₍ₖ₎
                     break
                 end
             
-                γₖ*=τ
+                γₖ *= τ
 
-                if isnan(γₖ) || γₖ<γₘᵢₙ
-                    return F_best, Inf, Inf, Inf
-                end
+                if isnan(γₖ) || γₖ < γₘᵢₙ
+                @warn "Busca linear resultou em isnan(γₖ) || γₖ < γₘᵢₙ" isnan(γₖ) γₖ < γₘᵢₙ
+                status = :exception
+                
+                break
+            end
             end
             
-            if Fvₖ<Fzₖ
-                vₗₐₛₜ, xₖ=xₖ, vₖ 
-                Fxₖ=Fvₖ
-                ∇fvₗₐₛₜ=∇fxₖ
-                αₒᵣγₗₐₛₜ=γₖ
+            if Fvₖ < Fzₖ
+                vₗₐₛₜ, xₖ = xₖ, vₖ 
+                Fxₖ = Fvₖ
+                ∇fvₗₐₛₜ = ∇fxₖ
+                αₒᵣγₗₐₛₜ = γₖ
             else
-                vₗₐₛₜ=yₖ
-                xₖ=zₖ
-                Fxₖ=Fzₖ 
-                ∇fvₗₐₛₜ=∇fyₖ
-                αₒᵣγₗₐₛₜ=αₖ
+                vₗₐₛₜ = yₖ
+                xₖ = zₖ
+                Fxₖ = Fzₖ 
+                ∇fvₗₐₛₜ = ∇fyₖ
+                αₒᵣγₗₐₛₜ = αₖ
             end
         end
         
-        if F_best>Fxₖ
-            F_best=Fxₖ
+        if F_best > Fxₖ
+            F_best = Fxₖ
+            x_best = xₖ
         end
 
-        T₁=time()
-        ∇fxₖ=∇f(xₖ)
-        Tᵥ=T₁-time()
+        T₁ = time()
+        ∇fxₖ = ∇f(xₖ)
+        T∇ = T₁-time()
 
-        ⎷nψₖ=norm(∇fxₖ.-∇fvₗₐₛₜ.+(vₗₐₛₜ.-xₖ)./αₒᵣγₗₐₛₜ, p)
-        T₀+=time()-T₁
+        F_hist[k+1] = Fxₖ
+        ⎷nψₖ = norm(∇fxₖ.-∇fvₗₐₛₜ.+(vₗₐₛₜ.-xₖ)./αₒᵣγₗₐₛₜ, p)
+        T₀ += time()-T₁ # Desconta o tempo entre T₁ e aqui
 
-        if ⎷nψₖ<ϵ
-            return F_best, time()-T₀, pr, gr
-        elseif k==kₘₐₓ
-            return F_best, Inf, Inf, Inf
+        if ⎷nψₖ < ϵ 
+            status = :optimal
+        elseif k == kₘₐₓ
+            status = :max_iter
+        elseif time()-T₀ >= Tₘₐₓ
+            status = :max_time
         end
-        k+=1
-        gr+=1
+        if status != :running
+            break
+        end
+        k += 1
+        nF_hist[k+1] = nF_hist[k]+1
+        pr_hist[k] = pr_hist[k-1]
+        gr_hist[k] = gr_hist[k-1]+1
         
         popfirst!(last_xₘ)
         push!(last_xₘ, Fxₖ)
-        tₖ₋₁, tₖ=tₖ, (1+sqrt(1+4*tₖ^2))/2
-        yₖ₋₁, yₖ=yₖ, xₖ.+(tₖ₋₁/tₖ).*(zₖ.-xₖ).+((tₖ₋₁-1)/tₖ).*(xₖ.-xₖ₋₁)
+        tₖ₋₁, tₖ = tₖ, (1+sqrt(1+4*tₖ^2))/2
+        yₖ₋₁, yₖ = yₖ, xₖ.+(tₖ₋₁/tₖ).*(zₖ.-xₖ).+((tₖ₋₁-1)/tₖ).*(xₖ.-xₖ₋₁)
         popfirst!(last_yₙ)
         push!(last_yₙ, F(yₖ))
-        xₖ₋₁=xₖ
-        syₖ=yₖ.-yₖ₋₁
-        nsyₖ=syₖ'syₖ
-        ∇fyₖ₋₁, ∇fyₖ=∇fyₖ, ∇f(yₖ)
-        ryₖ=∇fyₖ.-∇fyₖ₋₁
-        αₖ=nsyₖ/(syₖ'ryₖ)
-        if αₖ>αₘₐₓ || αₖ<αₘᵢₙ
-            αₖ=sqrt(nsyₖ/(ryₖ'ryₖ))
+        xₖ₋₁ = xₖ
+        syₖ = yₖ.-yₖ₋₁
+        nsyₖ = syₖ'syₖ
+        ∇fyₖ₋₁, ∇fyₖ = ∇fyₖ, ∇f(yₖ)
+        ryₖ = ∇fyₖ.-∇fyₖ₋₁
+        αₖ = nsyₖ/(syₖ'ryₖ)
+        if αₖ > αₘₐₓ || αₖ < αₘᵢₙ
+            αₖ = sqrt(nsyₖ/(ryₖ'ryₖ))
         end
     end 
+
+    return CompositeExecutionStats(
+                    status = status,
+                    problem = ProblemModel,
+                    solver = SolverModel,
+                    solution = xₖ,
+                    objective = F_hist[k+1],
+                    criticality = crit_hist[k],
+                    total_iter = k,
+                    elapsed_time = time()-T₀,
+                    nF_hist = nF_hist[1:k+1],
+                    pr_hist = pr_hist[1:k],
+                    gr_hist = gr_hist[1:k],
+                    F_hist = F_hist[1:k+1],
+                    crit_hist = crit_hist[1:k]
+                    )
 end
 
-function ANSPGopt(F:: Function, ∇f:: Function, prox:: Function, x₀:: Array{<:Number}, α₀:: Number, ρ:: Number, β:: Number, αₘᵢₙ:: Number, αₘₐₓ:: Number, n:: Int64, γ₀:: Number, τ:: Number, δ:: Number, γₘᵢₙ:: Number, γₘₐₓ:: Number, m:: Int64, kₘₐₓ:: Int64; ϵ=eps(), p=Inf)
-    pr=0
-    gr=1
-    Tᵥ=0.0 # Possible time spent on ∇f(xₖ) (doesn't happen each iteration)
+function ANSPGopt(ProblemModel:: AbstractCompositeModel, SolverModel:: ANSPGModel)
+    @unpack_ANSPGModel SolverModel
+    if isnothing(x₀)
+        x₀ = ProblemModel.x₀
+    end
+    if isnothing(x₀)
+        x₀ = ProblemModel.x₀
+    end
+    F, ∇f, prox = ProblemModel.Fopt, ProblemModel.∇fopt, ProblemModel.prox
     
-    T₀=time()
-    vₗₐₛₜ=xₖ₋₁=yₖ₋₁=yₖ=vₖ=zₖ=xₖ=x₀
-    Fxₖ, aux=F(xₖ)
-    F_best=Fvₖ=Fzₖ=Fxₖ
-    aux_z=aux_y=aux_v=aux
-    ∇fyₖ₋₁=∇fyₖ=∇fvₗₐₛₜ=∇fxₖ=∇f(xₖ, aux)
-    αₒᵣγₗₐₛₜ=αₖ=α₀
-    nzₖᵢ₋yₖ=tₖ=1.0 
+    F_hist = Vector{Float64}(undef, kₘₐₓ+1)
+    crit_hist = Vector{Float64}(undef, kₘₐₓ)
+    nF_hist = Vector{Int64}(undef, kₘₐₓ+1)
+    nF_hist[1:2] .= 1
+    pr_hist = Vector{Int64}(undef, kₘₐₓ)
+    pr_hist[1] = 0
+    gr_hist = Vector{Int64}(undef, kₘₐₓ)
+    gr_hist[1] = 1
+    T∇ = 0.0 # Tempo descontado quando ∇f(xₖ) é calculado para definir convergência, mas não é usado pelo método 
+    
+    T₀ = time()    
+    x_best = vₖ = yₖ₋₁ = yₖ = zₖ = vₗₐₛₜ = xₖ₋₁ = xₖ = x₀
+    Fxₖ, aux = F(xₖ)
+    F_best = Fvₖ = Fzₖ = Fxₖ
+    aux_z = aux_y = aux_v = aux
+    ∇fyₖ₋₁ = ∇fyₖ = ∇fvₗₐₛₜ = ∇fxₖ = ∇f(xₖ, aux)
+    if isnan(α₀)
+        α₀ = (sqrt(length(x₀))*10^-5)/norm(∇fxₖ.-ProblemModel.∇f(x₀.+10^-5))
+        gr_hist[1] += 1
+        
+        @info "α₀ = $(@sprintf "%.3e" α₀)"
+    end
+    αₒᵣγₗₐₛₜ = αₖ = α₀
+    nzₖᵢ₋yₖ = tₖ = 1.0  
+    last_yₙ = [Fxₖ for i = 1:n]
+    last_xₘ = [Fxₖ for i = 1:m]
+    
+    F_hist[1] = Fxₖ
 
-    last_yₙ=[Fxₖ for i=1:n]
-    last_xₘ=[Fxₖ for i=1:m]
-    
-    k=1
-    while true
-        Fyₗ₍ₖ₎=maximum(last_yₙ)
+    k = 1
+    status = k > kₘₐₓ ? :max_iter : time()-T₀ >= Tₘₐₓ ? :max_time : :running 
+    while status == :running
+        Fyₗ₍ₖ₎ = maximum(last_yₙ)
 
         while true
-            zₖ=prox(αₖ, yₖ, ∇fyₖ)
+            zₖ = prox(αₖ, yₖ, ∇fyₖ)
+            Fzₖ, aux_z = F(zₖ)
+            nzₖᵢ₋yₖ = norm(zₖ.-yₖ)^2
 
-            pr+=1
+            pr_hist[k] += 1
+            nF_hist[k+1] += 1
 
-            Fzₖ, aux_z=F(zₖ)
-            nzₖᵢ₋yₖ=norm(zₖ.-yₖ)^2
-
-            if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ)<=Fyₗ₍ₖ₎ 
+            if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ) <= Fyₗ₍ₖ₎ 
                 break
             end
 
-            αₖ*=ρ
+            αₖ *= ρ
 
-            if isnan(αₖ) || αₖ<αₘᵢₙ
+            if isnan(αₖ) || αₖ < αₘᵢₙ
+                @warn "Busca linear resultou em isnan(αₖ) || αₖ < αₘᵢₙ" isnan(αₖ) αₖ < αₘᵢₙ
+                status = :exception
+                
                 break
             end
         end
 
-        Fxₗ₍ₖ₎=maximum(last_xₘ)
+        Fxₗ₍ₖ₎ = maximum(last_xₘ)
 
-        if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ)<=Fxₗ₍ₖ₎
-            vₗₐₛₜ=yₖ
-            xₖ=zₖ
-            aux=aux_z
-            Fxₖ=Fzₖ
-            ∇fvₗₐₛₜ=∇fyₖ
-            αₒᵣγₗₐₛₜ=αₖ
+        if Fzₖ+β*nzₖᵢ₋yₖ/(2*αₖ) <= Fxₗ₍ₖ₎
+            vₗₐₛₜ = yₖ
+            xₖ = zₖ
+            aux = aux_z
+            Fxₖ = Fzₖ
+            ∇fvₗₐₛₜ = ∇fyₖ
+            αₒᵣγₗₐₛₜ = αₖ
         else
-            if k>1
-                sxₖ=xₖ.-yₖ₋₁
-                nsxₖ=sxₖ'sxₖ
-                rxₖ=∇fxₖ.-∇fyₖ₋₁
-                γₖ=nsxₖ/(sxₖ'rxₖ)
-                if γₖ>γₘₐₓ || γₖ<γₘᵢₙ
-                    γₖ=sqrt(nsxₖ/(rxₖ'rxₖ))
-                end
-
-                gr+=1
-                T₀+=Tᵥ
-            else
-                γₖ=γ₀
+            sxₖ = xₖ.-yₖ₋₁
+            nsxₖ = sxₖ'sxₖ
+            rxₖ = ∇fxₖ.-∇fyₖ₋₁
+            γₖ = nsxₖ/(sxₖ'rxₖ)
+            if γₖ > γₘₐₓ || γₖ < γₘᵢₙ
+                γₖ = sqrt(nsxₖ/(rxₖ'rxₖ))
             end
 
+            gr_hist[k] += 1
+            T₀ += T∇ # Acrescenta o tempo do cálculo ∇fxₖ que foi usado
+
             while true
-                vₖ=prox(γₖ, xₖ, ∇fxₖ)
+                vₖ = prox(γₖ, xₖ, ∇fxₖ)
+                Fvₖ, aux_v = F(vₖ)
 
-                pr+=1
+                pr_hist[k] += 1
+                nF_hist[k+1] += 1
 
-                Fvₖ, aux_v=F(vₖ)
-
-                if Fvₖ+δ*norm(vₖ.-xₖ)^2/(2*γₖ)<=Fxₗ₍ₖ₎
+                if Fvₖ+δ*norm(vₖ.-xₖ)^2/(2*γₖ) <= Fxₗ₍ₖ₎
                     break
                 end
             
-                γₖ*=τ
+                γₖ *= τ
 
-                if isnan(γₖ) || γₖ<γₘᵢₙ
-                    return F_best, Inf, Inf, Inf
-                end
+                if isnan(γₖ) || γₖ < γₘᵢₙ
+                @warn "Busca linear resultou em isnan(γₖ) || γₖ < γₘᵢₙ" isnan(γₖ) γₖ < γₘᵢₙ
+                status = :exception
+                
+                break
+            end
             end
             
-            if Fvₖ<Fzₖ
-                vₗₐₛₜ, xₖ=xₖ, vₖ 
-                aux=aux_v
-                Fxₖ=Fvₖ
-                ∇fvₗₐₛₜ=∇fxₖ
-                αₒᵣγₗₐₛₜ=γₖ
+            if Fvₖ < Fzₖ
+                vₗₐₛₜ, xₖ = xₖ, vₖ 
+                aux = aux_v
+                Fxₖ = Fvₖ
+                ∇fvₗₐₛₜ = ∇fxₖ
+                αₒᵣγₗₐₛₜ = γₖ
             else
-                vₗₐₛₜ=yₖ
-                xₖ=zₖ
-                aux=aux_z
-                Fxₖ=Fzₖ 
-                ∇fvₗₐₛₜ=∇fyₖ
-                αₒᵣγₗₐₛₜ=αₖ
+                vₗₐₛₜ = yₖ
+                xₖ = zₖ
+                aux = aux_z
+                Fxₖ = Fzₖ 
+                ∇fvₗₐₛₜ = ∇fyₖ
+                αₒᵣγₗₐₛₜ = αₖ
             end
         end
         
-        if F_best>Fxₖ
-            F_best=Fxₖ
+        if F_best > Fxₖ
+            F_best = Fxₖ
+            x_best = xₖ
         end
 
-        T₁=time()
-        ∇fxₖ=∇f(xₖ, aux)
-        Tᵥ=T₁-time()
+        T₁ = time()
+        ∇fxₖ = ∇f(xₖ, aux)
+        T∇ = T₁-time()
 
-        ⎷nψₖ=norm(∇fxₖ.-∇fvₗₐₛₜ.+(vₗₐₛₜ.-xₖ)./αₒᵣγₗₐₛₜ, p)
-        T₀+=time()-T₁
+        F_hist[k+1] = Fxₖ
+        ⎷nψₖ = norm(∇fxₖ.-∇fvₗₐₛₜ.+(vₗₐₛₜ.-xₖ)./αₒᵣγₗₐₛₜ, p)
+        T₀ += time()-T₁ # Desconta o tempo entre T₁ e aqui
 
-        if ⎷nψₖ<ϵ
-            return F_best, time()-T₀, pr, gr
-        elseif k==kₘₐₓ
-            return F_best, Inf, Inf, Inf
+        if ⎷nψₖ < ϵ 
+            status = :optimal
+        elseif k == kₘₐₓ
+            status = :max_iter
+        elseif time()-T₀ >= Tₘₐₓ
+            status = :max_time
         end
-        k+=1
-        gr+=1
+        if status != :running
+            break
+        end
+        k += 1
+        nF_hist[k+1] = nF_hist[k]+1
+        pr_hist[k] = pr_hist[k-1]
+        gr_hist[k] = gr_hist[k-1]+1
         
         popfirst!(last_xₘ)
         push!(last_xₘ, Fxₖ)
-        tₖ₋₁, tₖ=tₖ, (1+sqrt(1+4*tₖ^2))/2
-        yₖ₋₁, yₖ=yₖ, xₖ.+(tₖ₋₁/tₖ).*(zₖ.-xₖ).+((tₖ₋₁-1)/tₖ).*(xₖ.-xₖ₋₁)
+        tₖ₋₁, tₖ = tₖ, (1+sqrt(1+4*tₖ^2))/2
+        yₖ₋₁, yₖ = yₖ, xₖ.+(tₖ₋₁/tₖ).*(zₖ.-xₖ).+((tₖ₋₁-1)/tₖ).*(xₖ.-xₖ₋₁)
         popfirst!(last_yₙ)
-        Fyₖ, aux_y=F(yₖ)
+        Fyₖ, aux_y = F(yₖ)
         push!(last_yₙ, Fyₖ)
-        xₖ₋₁=xₖ
-        syₖ=yₖ.-yₖ₋₁
-        nsyₖ=syₖ'syₖ
-        ∇fyₖ₋₁, ∇fyₖ=∇fyₖ, ∇f(yₖ, aux_y)
-        ryₖ=∇fyₖ.-∇fyₖ₋₁
-        αₖ=nsyₖ/(syₖ'ryₖ)
-        if αₖ>αₘₐₓ || αₖ<αₘᵢₙ
-            αₖ=sqrt(nsyₖ/(ryₖ'ryₖ))
+        xₖ₋₁ = xₖ
+        syₖ = yₖ.-yₖ₋₁
+        nsyₖ = syₖ'syₖ
+        ∇fyₖ₋₁, ∇fyₖ = ∇fyₖ, ∇f(yₖ, aux_y)
+        ryₖ = ∇fyₖ.-∇fyₖ₋₁
+        αₖ = nsyₖ/(syₖ'ryₖ)
+        if αₖ > αₘₐₓ || αₖ < αₘᵢₙ
+            αₖ = sqrt(nsyₖ/(ryₖ'ryₖ))
         end
-    end 
+    end
+    
+    return CompositeExecutionStats(
+                    status = status,
+                    problem = ProblemModel,
+                    solver = SolverModel,
+                    solution = xₖ,
+                    objective = F_hist[k+1],
+                    criticality = crit_hist[k],
+                    total_iter = k,
+                    elapsed_time = time()-T₀,
+                    nF_hist = nF_hist[1:k+1],
+                    pr_hist = pr_hist[1:k],
+                    gr_hist = gr_hist[1:k],
+                    F_hist = F_hist[1:k+1],
+                    crit_hist = crit_hist[1:k]
+                    )
 end

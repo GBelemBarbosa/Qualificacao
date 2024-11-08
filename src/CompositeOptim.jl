@@ -1,135 +1,81 @@
 module CompositeOptim
-export solve, Solver, Problem
+export solve_composite, composite_solver, composite_model, CompositeExecutionStats
 
 using LinearAlgebra 
-# Para o cálculo de L=λₘₐₓ(ATA)
+# Para o cálculo de L = λₘₐₓ(ATA)
 using KrylovKit
+# Formatação de números
+using Printf
 # Structs com campos pre-definidos
 using Parameters: @with_kw
 # Análise de function specification
-using MethodAnalysis
+# using MethodAnalysis
 
-include("l2l0.jl")
+# Funções para o operador proximal da norma ℓ₀, ℓ₁ e MCP
+include("group_sparse_functions.jl")
 
-# Problem(class:: Symbol; variables=()) = eval(Symbol("Solver_"*string(class)))(variables=variables)
+# Structs e tipos abstratos de problemas e solvers
+include("AbstractCompositeModel.jl")
+include("AbstractSolverModel.jl")
 
-# Função para substituir parâmetros default por escolhas do usuário
-function append_params(params_default, params_user)
-    if typeof(params_user)<:Tuple{Vararg{<:Pair{Symbol, <:Any}}} 
-        for i=eachindex(params_default)
-            for param ∈ params_user
-                if params_default[i][1] == param[1]
-                    params_default[i]=param
-                end
-            end
-        end
+@with_kw struct CompositeExecutionStats
+    status:: Symbol = :nothing
 
-        return params_default
-    elseif typeof(params_user)<:Pair{Symbol, <:Any}
-        index=findfirst(param -> param[1]==params_user[1], params_default)
-        
-        if isnothing(index)
-            return params_default
-        else
-            params_default[index] = params_user
-            
-            return params_default
-        end
-    else
-        return params_default
-    end
+    problem:: AbstractCompositeModel = CompositeModel(optimizable = false)
+    solver:: AbstractCompositeSolver = SolverModel()
+
+    solution              = nothing
+    objective:: Number    = NaN
+    criticality:: Number  = NaN # ψₖ da última iteração  
+    total_iter:: Int64    = typemax(Int64)
+    elapsed_time:: Number = NaN
+    
+    nF_hist:: Array{Int64}      = Int64[] # Histórico de avaliações de F
+    pr_hist:: Array{Int64}      = Int64[] # Histórico de avaliações do prox
+    gr_hist:: Array{Int64}      = Int64[] # Histórico de avaliações ∇f 
+    F_hist:: Array{<:Number}    = Number[] # Histórico de F
+    crit_hist:: Array{<:Number} = Number[] # Histórico de ψₖ 
 end
+
+# Modelos de problemas
+include("l2l0.jl")
+include("l2l1.jl")
+include("l2MCP.jl")
+
+# Cria struct Solver do tipo correto para o algoritmo
+composite_model(class:: Symbol; params...) = eval(Symbol(string(class)*"Model"))(params = Dict(params); params...)
 
 # Algoritmos
 include("PG.jl")
 include("FISTA.jl")
 include("NSPG.jl")
+include("NHSPG.jl")
 include("ANSPG.jl")
+include("ANHSPG.jl")
 include("nmAPGLS.jl")
 include("newAPG_vs.jl")
 
-# Cria struct Solver do tipo correto para o algoritmo
-Solver(method:: Symbol; params=()) = eval(Symbol("Solver_"*string(method)))(params_user=params)
+# Cria struct Model do tipo correto para o algoritmo
+composite_solver(method:: Symbol; params...) = eval(Symbol(string(method)*"Model"))(params = Dict(params); params...)
 
-function solve(problem, solver, ϵ:: Number, kₘₐₓ:: Int64)
-    # Para acessar facilmente os parâmetros
-    d = Dict(solver.params)
+#=
+Struct do problema compósito 
 
-    # Verifica se usuário especificou parâmetro x₀ ou se é usado a escolha default (origem nesse caso)
-    if isnothing(d[:x₀])
-        x₀ = problem.x₀
-    else
-        x₀ = d[:x₀]
-    end
+  min_x F(x) = f(x) + h(x), com h(x) lsc
 
-    # Identifica o algoritmo do solver
-    if solver.method==:NSPG
-        # Verifica se usuário especificou parâmetro γ₀ ou se é usado a aproximação default
-        if isnothing(d[:γ₀])
-            γ₀ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
-        else
-            γ₀ = d[:γ₀]
-        end
-        println("γ₀ = ", γ₀)
+Input:
+  ProblemModel: 
+  SolverModel: 
+Output:
+  x: melhor/último iterando
+  his: function history
+  feval: number of function evals (total objective)
+=#
+function solve_composite(ProblemModel:: AbstractCompositeModel, SolverModel:: AbstractCompositeSolver)
+    opt_str = ProblemModel.optimizable ? "opt" : ""
 
-        # Executa o algoritmo no problema com os parâmetros selecionados
-        if problem.optmizable
-            return NSPGopt(problem.Fopt, problem.∇fopt, problem.prox, x₀, γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
-        else 
-            return NSPG(problem.F, problem.∇f, problem.prox, x₀, γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
-        end
-    elseif solver.method==:ANSPG
-        if isnothing(d[:γ₀])
-            γ₀ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
-
-            if isnothing(d[:α₀])
-                α₀ = γ₀
-            else
-                α₀ = d[:α₀]
-            end
-        else
-            γ₀ = d[:γ₀]
-        end
-        if isnothing(d[:α₀])
-            α₀ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
-        end
-        println("γ₀, α₀ = ", γ₀, ", ", α₀)
-
-        if problem.optmizable
-            return ANSPGopt(problem.Fopt, problem.∇fopt, problem.prox, x₀, α₀, d[:ρ], d[:β], d[:αₘᵢₙ,], d[:αₘₐₓ], Int(d[:n]), γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
-        else 
-            return ANSPG(problem.F, problem.∇f, problem.prox, x₀, α₀, d[:ρ], d[:β], d[:αₘᵢₙ,], d[:αₘₐₓ], Int(d[:n]), γ₀, d[:τ], d[:δ], d[:γₘᵢₙ], d[:γₘₐₓ], Int(d[:m]), kₘₐₓ; ϵ=ϵ)
-        end
-    elseif solver.method==:PG || solver.method==:FISTA
-        if isnothing(d[:L])
-            L = problem.L
-        end
-
-        return eval(solver.method)(problem.F, problem.∇f, problem.prox, x₀, L, kₘₐₓ; ϵ=ϵ)
-    elseif solver.method==:nmAPGLS
-        if isnothing(d[:α₀])
-            α₀ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
-        end
-        println("α₀ = ", α₀)
-        if problem.optmizable
-            return nmAPGLSopt(problem.Fopt, problem.∇fopt, problem.prox, x₀, α₀, d[:ρ], d[:η], d[:δ], kₘₐₓ; ϵ=ϵ)
-        else
-            return nmAPGLS(problem.F, problem.∇f, problem.prox, x₀, α₀, d[:ρ], d[:η], d[:δ], kₘₐₓ; ϵ=ϵ)
-        end
-     else
-        if isnothing(d[:λ₁])
-            λ₁ = (sqrt(problem.n)*10^-5)/norm(problem.∇f(x₀).-problem.∇f(x₀.+10^-5))
-        else
-            λ₁ = d[:λ₁]
-        end
-        println("λ₁ = ", λ₁)
-
-        if problem.optmizable
-            return newAPG_vsopt(problem.fopt, problem.h, problem.∇fopt, problem.prox, d[:Q], d[:E], x₀, λ₁, d[:μ₀], d[:μ₁], d[:c], d[:δ], kₘₐₓ; ϵ=ϵ)
-        else
-            return newAPG_vs(problem.f, problem.h, problem.∇f, problem.prox, d[:Q], d[:E], x₀, λ₁, d[:μ₀], d[:μ₁], d[:c], d[:δ], kₘₐₓ; ϵ=ϵ)
-        end
-    end
+    # Executa o algoritmo no problema com os parâmetros selecionados
+    return eval(Meta.parse(string(SolverModel.method)*opt_str))(ProblemModel, SolverModel)
 end     
 
 end
