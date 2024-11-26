@@ -36,9 +36,7 @@ end
 
 function UATPBTAT(x:: Vector{<:Number}, T:: Vector{Int64}, n:: Int64, group_indexs:: Vector{UnitRange{Int64}}; A = A)
     y = zeros(Float64, n)
-    @inbounds for j = T
-        y[Α(j, group_indexs)] = PDⱼ(x[Α(j, group_indexs)], j)
-    end
+    y[Α(T, group_indexs)] = PDⱼ(x[Α(T, group_indexs)], j)
 
     return y
 end
@@ -51,10 +49,8 @@ function UATPBTAT(x:: Vector{<:Number}, j:: Int64, n:: Int64)
 end
 
 function UATPBTAT(x:: Vector{<:Number}, T:: Vector{Int64}, n:: Int64)
-    y = zeros(Float64, n)
-    @inbounds for j = T
-        y[j] = x[j]
-    end
+    y = zeros(typeof(x[1]), n)
+    y[T] = x[T]
 
     return y
 end
@@ -100,14 +96,14 @@ T(ωx:: Vector{<:Number}, s:: Int64) = partialsortperm(ωx, 1:s, rev = true)
 T(ωx:: Vector{<:Number}) = sortperm(ωx, rev = true)
 
 function proxhL_l0(L:: Number, x:: Vector{<:Number}, l:: Int64, s:: Int64, λ:: Number, n:: Int64, group_indexs:: Vector{UnitRange{Int64}}; T = T, ω = ω, UATPBTAT = UATPBTAT)
-    ωx = ω(x)
+    ωx = ω(abs.(x))
     Tωx = T(ωx, s)
 
     return UATPBTAT(x, Tωx[1:max(l, searchsortedlast(ωx[Tωx], 2*λ/L, rev = true, lt = <=))], n, group_indexs)
 end
 
 function proxhL_l0(L:: Number, x:: Vector{<:Number}, l:: Int64, s:: Int64, λ:: Number, n:: Int64; T = T, ω = ω, UATPBTAT = UATPBTAT)
-    ωx = ω(x)
+    ωx = ω(abs.(x))
     Tωx = T(ωx, s)
 
     return UATPBTAT(x, Tωx[1:max(l, searchsortedlast(ωx[Tωx], 2*λ/L, rev = true, lt = <=))], n)

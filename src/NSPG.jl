@@ -57,7 +57,7 @@ function NSPG(ProblemModel:: AbstractCompositeModel, SolverModel:: NSPGModel)
             xₖ = prox(γₖ, xₖ₋₁, ∇fxₖ)
             Fxₖ = F(xₖ)
             sₖ = xₖ.-xₖ₋₁
-            nsₖ = real(sₖ'sₖ)
+            nsₖ = abs(sₖ'sₖ)
 
             nF₌pr₊1_hist[k+1] += 1
 
@@ -103,9 +103,9 @@ function NSPG(ProblemModel:: AbstractCompositeModel, SolverModel:: NSPGModel)
         push!(lastₘ, Fxₖ)
         xₖ₋₁ = xₖ
         rₖ = ∇fxₖ.-∇fxₖ₋₁
-        γₖ = nsₖ/real(sₖ'rₖ)
+        γₖ = nsₖ/abs(sₖ'rₖ)
         if γₖ > γₘₐₓ || γₖ < γₘᵢₙ
-            γₖ = sqrt(nsₖ/real((rₖ'rₖ)))
+            γₖ = sqrt(nsₖ/abs((rₖ'rₖ)))
         end
     end 
 
