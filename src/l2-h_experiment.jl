@@ -102,7 +102,7 @@ Já `ϵₐₗₗ = 10^`$(@bind exp Scrubbable(-5)) é usada para calcular `ϵ = 
 
 `ϵ` é a tolerância desejada para o critério de parada ``\|\psi_k\|_p<\epsilon``, sendo `p =` $(@bind p Select([Inf => "∞", 1 => 1, 2 => 2])) a norma escolhida.
 
-Escolha a regularização que induz esparsidade `h =` $(@bind h Select(["l0" => "ℓ₀", "l1" => "ℓ₁", "l1l0" => "ℓ₁-ℓ₀"])).
+`h =` $(@bind h Select(["l0" => "ℓ₀", "l1" => "ℓ₁", "l1l0" => "ℓ₁-ℓ₀"])) é a regularização que induz esparsidade.
 
 Executar: $(@bind trigger CheckBox(default = false)).
 """

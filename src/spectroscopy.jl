@@ -94,6 +94,31 @@ A variável `kₘₐₓ =` $(@bind kₘₐₓ Scrubbable(100:100:10000; default 
 Já `power = 10^`$(@bind expo Scrubbable(-5)) é usada para calcular `ϵ = L*power`, em que `L` é tal que ``\nabla f`` é `L`-Lipschitz contínuo. 
 """
 
+# ╔═╡ 6d9560fd-e723-488d-86f0-8b93e52615ba
+md"""
+`ϵ` é a tolerância desejada para o critério de parada ``\|\psi_k\|_p<\epsilon``, sendo `p =` $(@bind p Select([Inf => "∞", 1 => 1, 2 => 2])) a norma escolhida.
+
+O método $(@bind method Select([:NSPG => "NSPG", :PG => "PG"])) será utilizado para obter a solução.
+
+`h =` $(@bind regularizer Select(["l0" => "ℓ₀", "l1" => "ℓ₁"])) é a regularização que induz esparsidade.
+"""
+
+# ╔═╡ 5ee1acf6-fdb2-4eb8-b0e3-798bc8cb6a80
+if regularizer == "l0"
+	md"""
+	`λ =` $(@bind percentage Scrubbable(0:0.1:100, default = 10))`̇%⋅λₘₐₓℓ₀` é a penalização de esparsidade.
+
+	Seleção de `l` e `s`: $(@bind ls_method Select([true => "Porcentagem", false => "Manual"]))
+	"""
+else
+	md"""`λ =` $(@bind percentage Scrubbable(0:0.1:100, default = 10))`̇%⋅λₘₐₓℓ₁` é a penalização de esparsidade.
+	"""
+end
+
+# ╔═╡ 54f89220-0c24-4c96-8b00-97f3991e4279
+md"""Executar: $(@bind trigger CheckBox(default = false)).
+"""
+
 # ╔═╡ 13ad54ec-b3e3-45f3-ac1e-56e03f9958db
 md"""
 ## *Plots*
@@ -113,31 +138,28 @@ Especifique onde os dados devem ser salvos 👇.
 @bind path TextField((80, 1), default = pwd())
 
 # ╔═╡ f9e851c1-57e3-43f9-bef1-0c9a94ebb416
-md"""Download raw data: $(@bind trigger2 CheckBox(default = false))."""
+md"""Download dos dados do experimento: $(@bind trigger2 CheckBox(default = false))."""
 
 # ╔═╡ 97b2bf51-67db-428a-9b5c-aae8f0ff7856
 md"""
 ## Mágica adicional para rodar o caderno
 """
 
-# ╔═╡ c3fdffa0-33c8-4571-81b5-2c79e26d1510
+# ╔═╡ 595eeeef-94e8-44f1-bfcc-708631e90da5
 stats = [CompositeExecutionStats()];
-
-# ╔═╡ 423eb438-c57f-4d5f-8891-56db11cd03ad
-stat = stats[1];
 
 # ╔═╡ 4c44605b-c4b3-4933-a41d-66c0869f2899
 begin
-	emoji = stat.status == :optimal ? "👍" : "❌"
+	emoji = stats[1].status == :optimal ? "👍" : "❌"
 	md"""
-	O status final do método foi: $(stat.status) $(emoji).
+	O status final do método foi: $(stats[1].status) $(emoji).
 	"""
 end
 
 # ╔═╡ 0c8079ef-662f-4e29-9fbf-b92de2b19d24
 function plot_all(frequency_range:: Vector{<:Number}, spectrum:: Vector{<:Number}, interferogram:: Vector{<:Number})
-	p₁ = plot(frequency_range, spectrum, title = "Data spectrum", xlabel = "Frequency", ylabel = "Fourier component", label = "")
-	p₂ = plot(interferogram, title = "Interferogram data", xlabel = "Optical path [cm]", ylabel = "Volts [V]", label = "")
+	p₁ = plot(frequency_range, real.(spectrum), title = "Data spectrum", xlabel = "Frequency", ylabel = "Fourier component", label = "")
+	p₂ = plot(real.(interferogram), title = "Interferogram data", xlabel = "Optical path [cm]", ylabel = "Volts [V]", label = "")
 
 	return plot(p₁, p₂)
 end;
@@ -148,10 +170,10 @@ function read_CSV(nist_csv_file:: Dict; plot_toggle = true)
     frequency_range = df_nist_data[:, :x]
     spectrum        = df_nist_data[:, :y]
 
-    # Assumindo o interferograma do qual o espectro veio com o comprimento máximo possível 
+    # Assumindo o interferograma do qual o espectro veio com o comprimento máximo possível (n ímpar) 
 	# Poderia ser 2*length(frequency_range)-2 também (nenhum caso pode ser garantido sem mais informações)
     n             = 2*length(frequency_range)-1
-    interferogram = irfft(spectrum, n)
+	interferogram = irfft(spectrum, n)
 
     if plot_toggle
         return frequency_range, spectrum, interferogram, n, plot_all(frequency_range, spectrum, interferogram)
@@ -168,6 +190,9 @@ begin
 	plt_data
 end
 
+# ╔═╡ 787dc10c-db5c-4991-bcc4-42540e8618ea
+DownloadButton(plt_data, "data_plot_$(replace(data_file["name"], " " => "_")).png")
+
 # ╔═╡ 5d3fb486-b20e-473f-ba06-58a996f33954
 function get_m_samples(interferogram:: Vector{<:Number}, m:: Int64; plot_toggle = true)
     # interferograma discreto assumido como uniformemente espaçado, como o emitido por read_CSV
@@ -177,7 +202,7 @@ function get_m_samples(interferogram:: Vector{<:Number}, m:: Int64; plot_toggle 
     interferogramₘ = interferogram[sampleₘ.+1] 
 
     if plot_toggle
-        p = scatter(sampleₘ,  interferogramₘ, title = "m interferogram samples", xlabel = "Optical path [cm]", ylabel = "Volts [V]", label = "", dpi = 600)
+        p = scatter(sampleₘ,  real.(interferogramₘ), title = "m interferogram samples", xlabel = "Optical path [cm]", ylabel = "Volts [V]", label = "", dpi = 600)
 
 		return sampleₘ, interferogramₘ, p
     end
@@ -194,15 +219,46 @@ begin
 	plt_samples
 end
 
+# ╔═╡ f65f2db6-f39f-47f7-9e56-5e26d1a79836
+DownloadButton(plt_samples, "m_samples_plot_$(replace(data_file["name"], " " => "_"))_percentage=$(percent).png")
+
 # ╔═╡ 431dc3bb-73f8-4442-96c7-4730a3507dab
 begin
 	a = (2*π*im/n).*sampleₘ
+	# Interferogramas com n = 2*k ou 2*k+1 possuem o mesmo valor de n₂ = length(spectrum). Assumimos interferograma com n ímpar na reconstrução, evitando assim frequência Nyquist (única frequência real é com t = 0) 
 	n₂        = floor(Int, n/2)+1
     isNyquist = iseven(n)
 
 	x₀   = zeros(Complex{Float64}, n₂)
     expt = exp.((2*π*im/n).*sampleₘ)
 end;
+
+# ╔═╡ 703ce7e9-bc28-401c-be63-b68e5eb0f5f6
+if regularizer == "l0"
+	if ls_method
+		md"""As variáveis 
+		
+		`l = |{x ∈ spectrum data: x ≥` $(@bind l_percent Scrubbable(0:100; default = 100))`%⋅`$$\|$$`spectrum data`$$\|_\infty$$`}|` 
+		
+		e 
+		
+		`s = |{x ∈ spectrum data: x ≥` $(@bind s_percent Scrubbable(0:100; default = 0))`%⋅`$$\|$$`spectrum data`$$\|_\infty$$`}|`
+		
+		determinam os limitantes inferior e superior de esparsidade, respectivamente.		
+		"""
+	else
+		md"""As variáveis 
+		
+		`l =` $(@bind l_copy Scrubbable(0:50:n₂; default = 0)) 
+		
+		e 
+		
+		`s =` $(@bind s_copy Scrubbable(0:1:n₂; default = n₂)) 
+		
+		determinam os limitantes inferior e superior de esparsidade, respectivamente.		
+		"""
+	end
+end
 
 # ╔═╡ 644f267e-c70e-4084-88ea-28e84ee61bca
 begin 
@@ -225,7 +281,7 @@ begin
 
         for i = 2:n₂-isNyquist
             ∇fr[i]  = 2*v'aux            
-            v    .*= expt
+            v     .*= expt
         end
         if isNyquist
             ∇fr[end] = v'aux  
@@ -234,11 +290,11 @@ begin
         return ∇fr
     end
 
-	function f(x:: Vector{<:Number}; expt = expt, interferogram = interferogramₘ, n = n, n₂ = n₂, m = m, isNyquist=isNyquist)
+	function f(x:: Vector{<:Number}; expt = expt, interferogram = interferogramₘ, n = n, n₂ = n₂, m = m, isNyquist = isNyquist)
         v     = expt./n
         aux   = [real(x[begin])/n for i = 1:m]
 
-        for i=2:n₂-isNyquist
+        for i = 2:n₂-isNyquist
             aux .+= 2 .*real.(v.*x[i])
             v   .*= expt
         end
@@ -256,10 +312,62 @@ begin
 	# Quanto mais lacunas na amostra (m < n), eigmax(iDFT'iDFT) fica menor, portanto a escolha de L como um limite superior para o Lf real; 
 	# 1,01 é uma salvaguarda para garantir resultados que exigem 1/L <= 1/Lf mesmo com erros numéricos
 	L = 1.01*2/(2*n-1-isNyquist) 
-	aux    = norm(∇f(x₀), Inf)
-	λₘₐₓℓ₀ = aux^2/(2*L)
-	λₘₐₓℓ₁ = aux/L
+	λₘₐₓℓ₁ = norm(∇f(x₀), Inf)
+	λₘₐₓℓ₀ = λₘₐₓℓ₁^2/(2*L)
 end;
+
+# ╔═╡ 387721f6-6b0d-4f38-a1e4-e60eaf87562c
+begin
+	ratio = percentage/100
+	
+	if regularizer == "l0"
+		λ = ratio*λₘₐₓℓ₀
+	else
+		λ = ratio*λₘₐₓℓ₁
+	end
+end;
+
+# ╔═╡ 1ca44f01-4f22-45f8-aada-7023dda17d16
+mx = norm(spectrum_data, Inf);
+
+# ╔═╡ ceae643a-42ac-4f5c-988f-870322632abe
+if regularizer == "l0"
+	if ls_method 
+		l = count(x -> abs(x) >= l_percent*mx/100, spectrum_data)
+		s = count(x -> abs(x) >= s_percent*mx/100, spectrum_data)
+	else
+		l = l_copy
+		s = s_copy
+	end
+end;
+
+# ╔═╡ 76803860-03f6-4be9-81f9-099885e306dd
+if regularizer == "l0"
+	@bind experiment_name TextField(30, default = "m=$(m)_l=$(l)_s=$(s)_lambda=$(ratio)xlambda_max_$regularizer")
+else
+	@bind experiment_name TextField(30, default = "m=$(m)_lambda=$(ratio)xlambda_max_$regularizer")
+end
+
+# ╔═╡ 7762be40-be7b-44fc-b10b-0a2fedd0485b
+begin 	
+	h_here = regularizer == "l1" ? (x:: Vector{<:Number}) -> λ*norm(x, 1) : (x:: Vector{<:Number}; l = l, s = s, λ = λ) -> h(x, l, s, λ)
+
+	F(x:: Vector{<:Number}; f=f, h=h) = f(x)+h_here(x)
+
+	prox = regularizer == "l1" ? (αₖ:: Number, x, ∇fx:: Array{<:Number}; λ = λ) -> proxhL_l1(1/αₖ, x.-αₖ.*∇fx, λ) : (αₖ:: Number, x, ∇fx:: Array{<:Number}; l =l, s = s, λ = λ) -> proxhL_l0(1/αₖ, x.-αₖ.*∇fx, l, s, λ, n₂)
+end;
+
+# ╔═╡ 261491ed-5f4f-491f-a066-531cec7ed5a3
+experiment_name_full = "$(replace(data_file["name"], " " => "_"))_$(experiment_name)";
+
+# ╔═╡ 12d1b077-93f0-464d-840d-862597dd17ff
+md"""Nome completo: $experiment_name_full."""
+
+# ╔═╡ ca148193-131c-4e31-a9dc-6182b01e4053
+trigger2 ? begin
+	stat = stats[1]
+	jldsave("$path\\$experiment_name_full.jld2"; experiment_name, frequency_range, spectrum_data, sampleₘ, t_data, interferogram_data, stat) 
+end : nothing # Salva os dados enquanto a checkbox está ativa
 
 # ╔═╡ 103152af-5af1-4c07-8619-63af4e217824
 function reconstruct_interferogram(t_data:: Union{Vector{<:Number}, Base.OneTo{Int64}}, t_sample:: Vector{<:Number}, spectrum_sample:: Vector{<:Number}, interferogram_data:: Vector{<:Number})
@@ -285,13 +393,17 @@ end;
 
 # ╔═╡ ff58a2c9-e4f1-41ac-9316-17e6edd7cbfa
 function plot_reconstructed_spectrum(frequency_range:: Vector{<:Number}, spectrum_sample:: Vector{<:Number}, spectrum_data:: Vector{<:Number})
-    plot(frequency_range, real.(spectrum_data), lw =2, alpha = .5, label = "Spectrum data (real)", dpi = 600)
+    plot(frequency_range, spectrum_data, lw =2, alpha = .5, label = "Spectrum data (real)", dpi = 600)
     plot!(frequency_range, real.(spectrum_sample), label = "Spectrum from samples (real)")
-    plot!(title = "Spectrum data vs.\ninverseproblem spectrum", titlefont = font(10), xlabel = "Ratio of "*L"\lambda", ylabel = "Fourier frequency term")
+	plot!(frequency_range, imag.(spectrum_sample), label = "Spectrum from samples (imaginary)")
+    plot!(title = "Spectrum data vs.\ninverse problem spectrum", titlefont = font(10), xlabel = "Frequency", ylabel = "Fourier frequency term")
 end;
 
 # ╔═╡ 5c725dc9-bb1f-4b9b-973b-d649c0df8f59
-plt2 = plot_reconstructed_spectrum(frequency_range, stat.solution, spectrum_data)
+plt2 = plot_reconstructed_spectrum(frequency_range, stats[1].solution, spectrum_data)
+
+# ╔═╡ 0bbd8a71-5f77-4e64-a7d4-73fbaaa643ec
+DownloadButton(plt2, "spectrum_reconstruction_$experiment_name_full.png")
 
 # ╔═╡ 0f226e78-78cf-49bf-aba3-005fe3a2bdd5
 function plot_reconstruction(frequency_range:: Vector{<:Number}, spectrum_sample:: Vector{<:Number}, spectrum_data:: Vector{<:Number}, t_sample:: Vector{<:Number}, t_data:: Union{Vector{<:Number}, Base.OneTo{Int64}}, interferogram_data:: Vector{<:Number}) 
@@ -299,83 +411,20 @@ function plot_reconstruction(frequency_range:: Vector{<:Number}, spectrum_sample
 end;
 
 # ╔═╡ 08dfe2b7-e90b-4d43-8232-ec3d4d9cf6c2
-plt = plot_reconstruction(frequency_range, stat.solution, spectrum_data, sampleₘ, t_data, interferogram_data)
-
-# ╔═╡ b65778b5-820e-4e97-819e-3c51d78749c9
-ϵ = L*10.0^expo;
-
-# ╔═╡ 6d9560fd-e723-488d-86f0-8b93e52615ba
-md"""
-`ϵ =` $(@sprintf "%.3e" ϵ) é a tolerância desejada para o critério de parada ``\|\psi_k\|_p<\epsilon``, sendo `p =` $(@bind p Select([Inf => "∞", 1 => 1, 2 => 2])) a norma escolhida.
-
-Escolha a regularização que induz esparsidade `h =` $(@bind regularizer Select(["l0" => "ℓ₀", "l1" => "ℓ₁"]))
-
-Escolha o método: $(@bind method Select([:NSPG => "NSPG", :PG => "PG"])).
-"""
-
-# ╔═╡ 5ee1acf6-fdb2-4eb8-b0e3-798bc8cb6a80
-if regularizer == "l0"
-	md"""As variáveis `l =` $(@bind l Scrubbable(0:100:n; default = 0)) e `s =` $(@bind s Scrubbable(0:1:n; default = n)) determinam os limitantes inferior e superior de esparsidade, respectivamente.
-
-	Já `λ =` $(@bind percentage Scrubbable(0:1:100, default = 10))`̇%⋅λₘₐₓℓ₀` é a penalização de esparsidade.
-	
-	Executar: $(@bind trigger CheckBox(default = false))."""
-else
-	md"""`λ =` $(@bind percentage Scrubbable(0:1:100, default = 10))`̇%⋅λₘₐₓℓ₁` é a penalização de esparsidade.
-	
-	Executar: $(@bind trigger CheckBox(default = false))."""
-end
-
-# ╔═╡ 387721f6-6b0d-4f38-a1e4-e60eaf87562c
-begin
-	ratio = percentage/100
-	
-	if regularizer == "l0"
-		λ = ratio*λₘₐₓℓ₀
-	else
-		λ = ratio*λₘₐₓℓ₁
-	end
-end;
-
-# ╔═╡ 76803860-03f6-4be9-81f9-099885e306dd
-if regularizer == "l0"
-	@bind experiment_name TextField(30, default = "m=$(m)_l=$(l)_s=$(s)_lambda=$(ratio)xlambda_max_$h")
-else
-	@bind experiment_name TextField(30, default = "m=$(m)_lambda=$(ratio)xlambda_max_$h")
-end
-
-# ╔═╡ 261491ed-5f4f-491f-a066-531cec7ed5a3
-experiment_name_full = "$(replace(data_file["name"], " " => "_"))_$(experiment_name)";
-
-# ╔═╡ 12d1b077-93f0-464d-840d-862597dd17ff
-md"""Nome completo: $experiment_name_full."""
-
-# ╔═╡ 787dc10c-db5c-4991-bcc4-42540e8618ea
-DownloadButton(plt_data, "$(experiment_name_full)_data_plot.png")
-
-# ╔═╡ f65f2db6-f39f-47f7-9e56-5e26d1a79836
-DownloadButton(plt_samples, "$(experiment_name_full)_m_samples_plot.png")
+plt = plot_reconstruction(frequency_range, stats[1].solution, spectrum_data, sampleₘ, t_data, interferogram_data)
 
 # ╔═╡ 711391f7-7779-48b8-a865-384278b1a5e3
 DownloadButton(plt, "reconstruction_$experiment_name_full.png")
 
-# ╔═╡ 0bbd8a71-5f77-4e64-a7d4-73fbaaa643ec
-DownloadButton(plt, "spectrum_reconstruction_$experiment_name_full.png")
+# ╔═╡ b65778b5-820e-4e97-819e-3c51d78749c9
+ϵ = L*10.0^expo;
 
-# ╔═╡ ca148193-131c-4e31-a9dc-6182b01e4053
-trigger2 ? jldsave("$path\\$experiment_name_full.jld2"; experiment_name, frequency_range, spectrum_data, sampleₘ, t_data, interferogram_data, stat) : nothing # Salva os dados enquanto a checkbox está ativa
-
-# ╔═╡ 8ef7c4a6-4f03-4946-bfa7-2ef19eca14cd
-h(x₀, l, s, λ)
-
-# ╔═╡ 7762be40-be7b-44fc-b10b-0a2fedd0485b
-begin 	
-	h_here(x:: Vector{<:Number}; l = l, s = s, λ = λ) = regularizer == "l1" ? λ*norm(x, 1) : h(x, l, s, λ)
-
-	F(x:: Vector{<:Number}; f=f, h=h) = f(x)+h_here(x)
-
-	prox(αₖ:: Number, x, ∇fx:: Array{<:Number}; proxhL = eval(Meta.parse("proxhL_"*regularizer)), λ = λ) = proxhL(1/αₖ, x.-αₖ.*∇fx, λ)
-end;
+# ╔═╡ f796182e-f9b7-430a-8a91-bcddbe43e695
+if regularizer == "l0"
+	@info "Parâmetros selecionados:" l s λ ϵ
+else
+	@info "Parâmetros selecionados:" λ ϵ
+end
 
 # ╔═╡ 995fcfbe-0825-49b9-8550-e22484acf723
 trigger ? begin
@@ -431,7 +480,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.2"
 manifest_format = "2.0"
-project_hash = "ca0606cb3026c4acbd030149bbcc0daf977aee68"
+project_hash = "006e004b2e67c2b9c101481338a7aabbfc4fe79d"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra", "Test"]
@@ -1728,12 +1777,15 @@ version = "1.4.1+1"
 # ╟─88f96c7c-97df-4de4-a1a5-b53a7381fff9
 # ╟─6d9560fd-e723-488d-86f0-8b93e52615ba
 # ╟─5ee1acf6-fdb2-4eb8-b0e3-798bc8cb6a80
+# ╟─703ce7e9-bc28-401c-be63-b68e5eb0f5f6
+# ╟─f796182e-f9b7-430a-8a91-bcddbe43e695
+# ╟─54f89220-0c24-4c96-8b00-97f3991e4279
 # ╠═995fcfbe-0825-49b9-8550-e22484acf723
 # ╟─4c44605b-c4b3-4933-a41d-66c0869f2899
 # ╟─13ad54ec-b3e3-45f3-ac1e-56e03f9958db
 # ╟─08dfe2b7-e90b-4d43-8232-ec3d4d9cf6c2
 # ╟─711391f7-7779-48b8-a865-384278b1a5e3
-# ╟─5c725dc9-bb1f-4b9b-973b-d649c0df8f59
+# ╠═5c725dc9-bb1f-4b9b-973b-d649c0df8f59
 # ╟─0bbd8a71-5f77-4e64-a7d4-73fbaaa643ec
 # ╟─c1d5434b-b80f-463a-b06a-8d9a03ef1f7e
 # ╟─e4ea40f5-0483-4fcb-adf6-44b28737f68c
@@ -1741,8 +1793,7 @@ version = "1.4.1+1"
 # ╟─f9e851c1-57e3-43f9-bef1-0c9a94ebb416
 # ╟─97b2bf51-67db-428a-9b5c-aae8f0ff7856
 # ╠═738071ee-58b6-4cfe-a78b-8500daf98cae
-# ╠═c3fdffa0-33c8-4571-81b5-2c79e26d1510
-# ╠═423eb438-c57f-4d5f-8891-56db11cd03ad
+# ╠═595eeeef-94e8-44f1-bfcc-708631e90da5
 # ╠═ca148193-131c-4e31-a9dc-6182b01e4053
 # ╠═def70c2c-6e78-400d-845b-bf9aa652dc53
 # ╠═0c8079ef-662f-4e29-9fbf-b92de2b19d24
@@ -1750,9 +1801,10 @@ version = "1.4.1+1"
 # ╠═431dc3bb-73f8-4442-96c7-4730a3507dab
 # ╠═644f267e-c70e-4084-88ea-28e84ee61bca
 # ╠═ac1be130-a787-4f69-9fc6-ba870aad628c
-# ╠═8ef7c4a6-4f03-4946-bfa7-2ef19eca14cd
 # ╠═7762be40-be7b-44fc-b10b-0a2fedd0485b
 # ╠═387721f6-6b0d-4f38-a1e4-e60eaf87562c
+# ╠═1ca44f01-4f22-45f8-aada-7023dda17d16
+# ╠═ceae643a-42ac-4f5c-988f-870322632abe
 # ╠═261491ed-5f4f-491f-a066-531cec7ed5a3
 # ╠═103152af-5af1-4c07-8619-63af4e217824
 # ╠═ff58a2c9-e4f1-41ac-9316-17e6edd7cbfa
